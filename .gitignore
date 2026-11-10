@@ -1,0 +1,9 @@
+.venv/
+.run/
+__pycache__/
+*.pyc
+.attachments/
+.playwright-mcp/
+.mimocode/
+*.egg-info/
+.DS_Store

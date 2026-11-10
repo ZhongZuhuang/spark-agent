@@ -1,0 +1,7 @@
+pydantic-ai-slim[openai]==2.51.0
+fastapi==0.141.1
+uvicorn==0.48.0
+requests>=2.32
+python-multipart>=0.0.9
+openpyxl>=3.1.5
+python-docx>=1.1.2

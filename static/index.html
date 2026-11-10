@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Spark Agent</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css?v=20261108.18">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <img src="/static/logo.svg" alt="">
+        </div>
+        <div>
+          <div class="brand-title">Spark</div>
+          <div class="brand-subtitle">本地文件与代码助手</div>
+        </div>
+      </div>
+
+      <button id="newChat" class="primary-button" type="button">
+        <span>＋</span> 新对话
+      </button>
+
+      <section class="panel conversations-panel">
+        <div class="panel-heading">
+          <span>会话</span>
+          <span id="conversationCount" class="pill">0</span>
+        </div>
+        <div id="conversationList" class="conversation-list">
+          <div class="conversation-empty muted">暂无已保存对话</div>
+        </div>
+      </section>
+
+      <div class="sidebar-bottom">
+        <section class="panel runtime-panel">
+          <div class="panel-heading"><span>模型</span></div>
+          <div class="runtime-merged">
+            <div class="context-ring" id="contextRing" style="--progress:0deg"></div>
+            <div class="runtime-copy">
+              <div class="runtime-label">上下文</div>
+              <div id="contextUsage">— / —</div>
+            </div>
+            <div class="model-inline">
+              <div class="model-inline-head">
+                <span id="statusDot" class="status-dot"></span>
+                <span id="statusText">正在检测模型…</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel workspace-panel">
+          <div class="panel-heading"><span>工作区</span></div>
+          <div class="workspace-switch">
+            <input id="workspaceInput" type="text" spellcheck="false" autocomplete="off"
+                   aria-label="切换工作目录" placeholder="/path/to/project">
+            <button id="switchWorkspace" type="button">切换</button>
+          </div>
+          <p id="workspaceHint">shell 默认使用 bubblewrap，仅当前目录可写。</p>
+        </section>
+      </div>
+
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="sidebarToggle" class="icon-button mobile-only" type="button" aria-label="打开侧栏">☰</button>
+        <div>
+          <h1 id="topTitle">新对话</h1>
+          <span id="saveStatus" class="save-status">自动保存已开启</span>
+        </div>
+        <a class="ghost-button top-link" id="openSettings" href="#" role="button">设置</a>
+        <button id="stopLlama" class="ghost-button stop-llama" type="button" title="停止主模型 llama.cpp（手动停止后不会自动重启）">停止模型</button>
+      </header>
+
+      <div id="messages" class="messages">
+        <section class="welcome" id="welcome">
+          <div class="welcome-orb" aria-hidden="true">
+            <img src="/static/logo.svg" alt="">
+          </div>
+          <h2>需要处理什么？</h2>
+          <p>读取与整理文件、执行隔离命令、分析 Word / PPT / Excel 附件，复杂任务会先列出计划。</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="先了解当前项目：读取目录结构和 README，然后给我一份简要总结。">了解当前项目</button>
+            <button type="button" data-prompt="帮我检查这个工作区里可能存在的问题，并给出优先级列表。">检查项目问题</button>
+            <button type="button" data-prompt="先预览当前目录，然后给我一套安全的文件整理方案；未经我确认不要实际移动。">整理文件</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="composer-wrap">
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="1" maxlength="100000" placeholder="输入任务，或添加任意附件（图片 / Office / 文本…）（Enter 发送）"></textarea>
+          <div id="attachmentList" class="attachment-list" hidden></div>
+          <div class="composer-actions">
+            <div class="composer-left">
+              <button id="attachButton" class="attach-button" type="button" title="添加附件（任意格式）" aria-label="添加附件">＋ 附件</button>
+              <input id="attachmentInput" type="file" multiple hidden
+                     accept="*/*">
+              <span id="charCount">0</span>
+            </div>
+            <button id="sendButton" type="submit" aria-label="发送">
+              <span class="send-label">发送</span><span class="send-arrow">↑</span>
+            </button>
+          </div>
+        </form>
+        <div class="disclaimer">工具会真实读写文件或执行命令；请先确认工作区路径。</div>
+      </div>
+    </main>
+
+    <aside class="rightbar">
+      <section class="panel plan-panel">
+        <div class="panel-heading">
+          <span>执行计划</span>
+          <span id="planCount" class="pill">0</span>
+        </div>
+        <div id="planBody" class="plan-body muted">复杂任务会在这里显示步骤。</div>
+      </section>
+
+      <section class="panel loop-panel">
+        <div class="panel-heading">
+          <span>任务进度</span>
+          <span id="loopCount" class="pill">0</span>
+        </div>
+        <div id="loopBody" class="loop-body muted">等待任务…</div>
+      </section>
+
+    </aside>
+  </div>
+
+  <!-- Settings / About modal — custom control library (controls.js) -->
+  <div id="appModal" class="modal-root" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <header class="modal-head">
+        <div class="modal-tabs" role="tablist">
+          <button type="button" class="modal-tab active" data-tab="settings" id="tabSettings">设置</button>
+          <button type="button" class="modal-tab" data-tab="about" id="tabAbout">关于</button>
+        </div>
+        <button type="button" class="modal-close" data-close-modal aria-label="关闭">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+      <div class="modal-body">
+        <h2 id="modalTitle" class="sr-only">设置与关于</h2>
+
+        <!-- ===== 设置 ===== -->
+        <div class="modal-panel" data-panel="settings" id="panelSettings">
+          <p class="sp-lead">写入 <code>.run/settings.json</code>，保存后自动重启 llama.cpp。</p>
+
+          <section class="sp-card">
+            <div class="sp-card-head">
+              <span class="sp-card-title">运行环境</span>
+              <span class="sp-card-sub">llama.cpp · 可移植部署</span>
+            </div>
+            <div class="sp-form-grid">
+              <div class="sp-field" style="grid-column:1/-1">
+                <span class="sp-label">llama-server 可执行文件</span>
+                <input id="settingLlamaBin" type="text" placeholder="留空自动探测；或填 /usr/bin/llama-server" spellcheck="false">
+              </div>
+              <div class="sp-field" style="grid-column:1/-1">
+                <span class="sp-label">模型扫描目录（GGUF）</span>
+                <input id="settingModelDir" type="text" placeholder="例如 /home/you/models" spellcheck="false">
+              </div>
+            </div>
+            <p class="sp-hint" id="llamaBinHint">自动探测 PATH / 常见安装路径；手动填写优先。</p>
+          </section>
+
+          <section class="sp-card">
+            <div class="sp-card-head">
+              <span class="sp-card-title">模型</span>
+              <span class="sp-card-sub">GGUF · 扫描目录</span>
+            </div>
+            <div id="modelInfo" class="sp-model-info">
+              <div class="sp-model-name">读取中…</div>
+            </div>
+            <div class="sp-field">
+              <span class="sp-label">选择模型文件</span>
+              <select id="settingModel" size="6" aria-label="选择模型文件"></select>
+            </div>
+            <p class="sp-hint" id="modelDirHint"></p>
+          </section>
+
+          <section class="sp-card" id="capCard">
+            <div class="sp-card-head">
+              <span class="sp-card-title">模型能力</span>
+              <span class="sp-card-sub">按 GGUF 自动识别 · 只显示存在的选项</span>
+            </div>
+            <div id="capBadges" class="sp-cap-badges"></div>
+            <div class="sp-form-grid" id="capSettings">
+              <div class="sp-field" id="fieldVision" data-cap="vision" hidden>
+                <span class="sp-label">视觉输入（mmproj）</span>
+                <select id="settingVision">
+                  <option value="1">启用 · 图片可进模型</option>
+                  <option value="0">关闭 · 仅文本</option>
+                </select>
+              </div>
+              <div class="sp-field" id="fieldMtp" data-cap="mtp" hidden>
+                <span class="sp-label">MTP 多词预测层</span>
+                <select id="settingMtp">
+                  <option value="1">启用 MTP 偏好</option>
+                  <option value="0">关闭 MTP</option>
+                </select>
+              </div>
+              <div class="sp-field" id="fieldSpec" data-cap="spec" hidden>
+                <span class="sp-label">投机解码偏好</span>
+                <select id="settingSpec">
+                  <option value="0">关闭</option>
+                  <option value="1">启用（需 draft/MTP）</option>
+                </select>
+              </div>
+            </div>
+            <p class="sp-hint" id="capEmpty" hidden>当前为纯文本模型：无视觉 mmproj、MTP 等可调项。</p>
+            <p class="sp-hint" id="capHint">选择模型后按能力显示对应开关。</p>
+          </section>
+
+          <section class="sp-card">
+            <div class="sp-card-head">
+              <span class="sp-card-title">推理</span>
+            </div>
+            <div class="sp-form-grid">
+              <div class="sp-field">
+                <span class="sp-label">上下文长度</span>
+                <select id="settingContext">
+                  <option value="16384">16384 · 快</option>
+                  <option value="32768">32768 · 均衡</option>
+                  <option value="65536">65536 · 大</option>
+                  <option value="131072">131072 · 极限</option>
+                </select>
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">运行模式</span>
+                <select id="settingProfile">
+                  <option value="gpu">GPU 快速</option>
+                  <option value="ram">内存大上下文</option>
+                  <option value="auto">自动</option>
+                </select>
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">GPU Layers</span>
+                <select id="settingGpuLayers">
+                  <option value="auto">auto</option>
+                  <option value="999">999 · 全 GPU</option>
+                  <option value="36">36</option>
+                  <option value="18">18 · 混合</option>
+                  <option value="0">0 · CPU</option>
+                </select>
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">Flash Attention</span>
+                <select id="settingFlash">
+                  <option value="on">on</option>
+                  <option value="off">off</option>
+                  <option value="auto">auto</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section class="sp-card">
+            <div class="sp-card-head">
+              <span class="sp-card-title">性能</span>
+            </div>
+            <div class="sp-form-grid">
+              <div class="sp-field">
+                <span class="sp-label">CPU 线程</span>
+                <input id="settingThreads" type="number" min="1" max="32" step="1" />
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">Batch 线程</span>
+                <input id="settingBatch" type="number" min="1" max="32" step="1" />
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">模型输出上限</span>
+                <select id="settingMaxTokens">
+                  <option value="4096">4096</option>
+                  <option value="8192">8192</option>
+                  <option value="12288">12288 · 推荐</option>
+                  <option value="16384">16384</option>
+                </select>
+              </div>
+              <div class="sp-field">
+                <span class="sp-label">压缩阈值</span>
+                <input id="settingThreshold" type="number" min="0.5" max="0.95" step="0.05" />
+              </div>
+            </div>
+            <div class="sp-field-row">
+              <span class="sp-label">自动压缩上下文</span>
+              <label class="sp-switch">
+                <input id="settingAutoCompact" type="checkbox" />
+                <span class="sp-switch-track"><span class="sp-switch-thumb"></span></span>
+              </label>
+            </div>
+          </section>
+
+          <div class="sp-actions">
+            <button id="saveSettings" class="sp-btn sp-btn-primary" type="button">保存并重启 llama.cpp</button>
+            <span id="settingsStatus" class="sp-hint">当前设置</span>
+          </div>
+
+          <section class="sp-card sp-card-muted">
+            <div class="sp-card-head">
+              <span class="sp-card-title">运行健康</span>
+            </div>
+            <div id="healthDetail" class="sp-hint">读取中…</div>
+            <div id="liveModel" class="sp-hint"></div>
+          </section>
+        </div>
+
+        <!-- ===== 关于 ===== -->
+        <div class="modal-panel" data-panel="about" id="panelAbout" hidden>
+          <p class="sp-lead">运行在本机的轻量级文件、代码与联网助手。</p>
+          <div class="sp-badge" id="healthBadge">正在检测模型…</div>
+
+          <section class="sp-card">
+            <div class="sp-card-head"><span class="sp-card-title">环境</span></div>
+            <dl class="sp-dl">
+              <div class="sp-dl-row"><dt>模型</dt><dd id="aboutModel">Spark</dd></div>
+              <div class="sp-dl-row"><dt>上下文</dt><dd id="aboutContext">检测中…</dd></div>
+              <div class="sp-dl-row"><dt>工作区</dt><dd id="aboutWorkspace">检测中…</dd></div>
+              <div class="sp-dl-row"><dt>运行模式</dt><dd id="aboutMode">检测中…</dd></div>
+            </dl>
+          </section>
+
+          <section class="sp-card">
+            <div class="sp-card-head">
+              <span class="sp-card-title">可用工具</span>
+              <span class="sp-card-sub">Agent</span>
+            </div>
+            <div class="sp-chips" id="aboutToolGrid"></div>
+          </section>
+
+          <section class="sp-card">
+            <div class="sp-card-head"><span class="sp-card-title">安全边界</span></div>
+            <ul class="sp-list">
+              <li>shell 默认 bubblewrap 隔离，工作区外通常只读。</li>
+              <li>读写与批量操作限制在当前工作区内。</li>
+              <li>同一时间仅允许一个 Agent 请求。</li>
+            </ul>
+          </section>
+
+          <p class="sp-hint sp-footer-note">Spark · Pydantic AI · llama.cpp · FastAPI</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/static/controls.js?v=20261108.18"></script>
+  <script src="/static/app.js?v=20261108.18"></script>
+</body>
+</html>
